@@ -1,335 +1,1106 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Predictive RPS AI</title>
+<meta charset="UTF-8">
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
-        body {
-            margin: 0;
-            min-height: 100vh;
-            font-family: Arial, sans-serif;
-            background: #111;
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
+<title>Predictive RPS AI</title>
 
-        .container {
-            width: 95%;
-            max-width: 600px;
-            text-align: center;
-        }
+<script type="module">
 
-        h1 {
-            margin-bottom: 5px;
-        }
+import {
+    HandLandmarker,
+    FilesetResolver
+}
+from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1/+esm";
 
-        .subtitle {
-            color: #aaa;
-            margin-bottom: 20px;
-        }
 
-        .camera-box {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 4 / 3;
-            background: #222;
-            border-radius: 20px;
-            overflow: hidden;
-        }
+let handLandmarker;
 
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
+let running = false;
 
-        .status {
-            margin-top: 15px;
-            padding: 15px;
-            background: #222;
-            border-radius: 15px;
-            font-size: 20px;
-        }
+let previousFeatures = null;
 
-        .prediction {
-            font-size: 32px;
-            font-weight: bold;
-            margin: 10px;
-        }
+let movementHistory = [];
 
-        .confidence {
-            color: #aaa;
-        }
-
-        button {
-            margin-top: 20px;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 12px;
-            background: white;
-            color: black;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        button:active {
-            transform: scale(0.95);
-        }
-
-        .score {
-            margin-top: 20px;
-            font-size: 18px;
-        }
-
-        .robot {
-            font-size: 60px;
-            margin: 10px;
-        }
-
-        .result {
-            font-size: 24px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-    </style>
-</head>
-
-<body>
-
-<div class="container">
-
-    <h1>🤖 Predictive RPS AI</h1>
-
-    <div class="subtitle">
-        Can AI predict your move?
-    </div>
-
-    <div class="camera-box">
-        <video id="camera" autoplay playsinline></video>
-    </div>
-
-    <div class="status" id="status">
-        Press START
-    </div>
-
-    <div class="prediction" id="prediction">
-        ❓
-    </div>
-
-    <div class="confidence" id="confidence">
-        Confidence: 0%
-    </div>
-
-    <button onclick="startGame()">
-        START GAME
-    </button>
-
-    <div class="robot">
-        🤖
-    </div>
-
-    <div class="result" id="result">
-        
-    </div>
-
-    <div class="score">
-        You: <span id="playerScore">0</span>
-        &nbsp;&nbsp; Robot:
-        <span id="robotScore">0</span>
-    </div>
-
-</div>
-
-<script>
-
-const video = document.getElementById("camera");
-
-const statusText = document.getElementById("status");
-const predictionText = document.getElementById("prediction");
-const confidenceText = document.getElementById("confidence");
-const resultText = document.getElementById("result");
+let predictionLocked = false;
 
 let playerScore = 0;
 let robotScore = 0;
 
-let gameRunning = false;
+let lastVideoTime = -1;
 
 
-// -------------------------------
-// START CAMERA
-// -------------------------------
+/* ---------------------------------------
+   MEDIAPIPE INITIALIZATION
+--------------------------------------- */
+
+async function initializeAI() {
+
+    const vision =
+        await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1/wasm"
+        );
+
+
+    handLandmarker =
+        await HandLandmarker.createFromOptions(
+            vision,
+            {
+
+                baseOptions: {
+
+                    modelAssetPath:
+                    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+
+                },
+
+                runningMode: "VIDEO",
+
+                numHands: 1
+
+            }
+        );
+
+
+    document.getElementById("status").innerText =
+        "AI READY 🤖";
+
+}
+
+
+/* ---------------------------------------
+   CAMERA
+--------------------------------------- */
 
 async function startCamera() {
 
     try {
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: "user"
-            },
-            audio: false
-        });
+        const stream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video: {
+
+                    facingMode: "user",
+
+                    width: {
+                        ideal: 640
+                    },
+
+                    height: {
+                        ideal: 480
+                    }
+
+                },
+
+                audio: false
+
+            });
+
+
+        const video =
+            document.getElementById("camera");
 
         video.srcObject = stream;
 
-    } catch (error) {
+        await video.play();
 
-        statusText.innerText =
-            "❌ Camera permission denied";
+
+        running = true;
+
+        document.getElementById("status").innerText =
+            "SHOW ME YOUR MOVE ✋";
+
+
+        requestAnimationFrame(processFrame);
+
+
+    }
+
+    catch(error) {
+
+        document.getElementById("status").innerText =
+            "Camera permission required ❌";
 
         console.error(error);
+
     }
+
 }
 
 
-// -------------------------------
-// START GAME
-// -------------------------------
+/* ---------------------------------------
+   PROCESS CAMERA FRAMES
+--------------------------------------- */
 
-function startGame() {
+async function processFrame() {
 
-    if (gameRunning)
-        return;
-
-    gameRunning = true;
-
-    resultText.innerText = "";
-
-    statusText.innerText =
-        "👋 Show me your move...";
-
-    predictionText.innerText =
-        "🔮 Thinking...";
-
-    confidenceText.innerText =
-        "Confidence: calculating...";
+    if (!running) return;
 
 
-    // Simulate the AI observing your movement
+    const video =
+        document.getElementById("camera");
 
-    setTimeout(() => {
 
-        predictMove();
+    if (
+        video.readyState >= 2 &&
+        video.currentTime !== lastVideoTime
+    ) {
 
-    }, 2500);
+        lastVideoTime = video.currentTime;
+
+
+        const results =
+            handLandmarker.detectForVideo(
+                video,
+                performance.now()
+            );
+
+
+        if (
+            results.landmarks &&
+            results.landmarks.length > 0
+        ) {
+
+            const landmarks =
+                results.landmarks[0];
+
+
+            analyzeHand(landmarks);
+
+        }
+
+    }
+
+
+    requestAnimationFrame(processFrame);
+
 }
 
 
-// -------------------------------
-// PREDICT MOVE
-// -------------------------------
+/* ---------------------------------------
+   HAND ANALYSIS
+--------------------------------------- */
+
+function analyzeHand(hand) {
+
+    /*
+        MediaPipe gives us 21 points.
+
+        Important points:
+
+        Thumb
+        Index
+        Middle
+        Ring
+        Pinky
+
+        We calculate whether each finger
+        is extended or curled.
+    */
+
+
+    const features =
+        getFingerFeatures(hand);
+
+
+    /*
+        Calculate movement.
+
+        This lets us look at how the hand
+        is changing instead of only looking
+        at the final pose.
+    */
+
+    let movement = 0;
+
+
+    if (previousFeatures !== null) {
+
+        for (let i = 0; i < features.length; i++) {
+
+            movement +=
+                Math.abs(
+                    features[i] -
+                    previousFeatures[i]
+                );
+
+        }
+
+    }
+
+
+    previousFeatures = features;
+
+
+    movementHistory.push({
+
+        features: features,
+
+        movement: movement,
+
+        time: Date.now()
+
+    });
+
+
+    /*
+        Keep approximately the last
+        1.5 seconds of movement.
+    */
+
+    const now = Date.now();
+
+    movementHistory =
+        movementHistory.filter(
+            item => now - item.time < 1500
+        );
+
+
+    /*
+        Don't immediately predict.
+
+        Wait until we have enough
+        movement information.
+    */
+
+    if (
+        movementHistory.length > 8 &&
+        !predictionLocked
+    ) {
+
+        const prediction =
+            predictMove();
+
+
+        if (prediction.confidence >= 70) {
+
+            lockPrediction(
+                prediction.move,
+                prediction.confidence
+            );
+
+        }
+
+    }
+
+}
+
+
+/* ---------------------------------------
+   FINGER FEATURES
+--------------------------------------- */
+
+function getFingerFeatures(hand) {
+
+    /*
+        Landmark indexes:
+
+        0  = wrist
+
+        Thumb:
+        4  = tip
+
+        Index:
+        8  = tip
+
+        Middle:
+        12 = tip
+
+        Ring:
+        16 = tip
+
+        Pinky:
+        20 = tip
+    */
+
+
+    const wrist = hand[0];
+
+
+    const thumb =
+        distance(hand[4], wrist);
+
+    const index =
+        distance(hand[8], wrist);
+
+    const middle =
+        distance(hand[12], wrist);
+
+    const ring =
+        distance(hand[16], wrist);
+
+    const pinky =
+        distance(hand[20], wrist);
+
+
+    /*
+        Normalize using palm size.
+    */
+
+    const palm =
+        distance(hand[0], hand[9]);
+
+
+    return [
+
+        thumb / palm,
+
+        index / palm,
+
+        middle / palm,
+
+        ring / palm,
+
+        pinky / palm
+
+    ];
+
+}
+
+
+/* ---------------------------------------
+   DISTANCE
+--------------------------------------- */
+
+function distance(a, b) {
+
+    const dx =
+        a.x - b.x;
+
+    const dy =
+        a.y - b.y;
+
+    const dz =
+        a.z - b.z;
+
+
+    return Math.sqrt(
+
+        dx * dx +
+        dy * dy +
+        dz * dz
+
+    );
+
+}
+
+
+/* ---------------------------------------
+   PREDICTION ENGINE
+--------------------------------------- */
 
 function predictMove() {
 
     /*
-        TEMPORARY PREDICTION ENGINE
-
-        Later we will replace this with
-        actual MediaPipe hand landmarks.
-
-        For now it randomly predicts a move
-        so that the complete game works.
+        Take the most recent hand state.
     */
 
-    const moves = [
-        "ROCK",
-        "PAPER",
-        "SCISSORS"
-    ];
-
-    const predicted =
-        moves[Math.floor(Math.random() * moves.length)];
+    const current =
+        movementHistory[
+            movementHistory.length - 1
+        ].features;
 
 
-    const confidence =
-        Math.floor(Math.random() * 20) + 80;
+    const thumb =
+        current[0];
+
+    const index =
+        current[1];
+
+    const middle =
+        current[2];
+
+    const ring =
+        current[3];
+
+    const pinky =
+        current[4];
 
 
-    predictionText.innerText =
-        predicted;
+    /*
+        Estimate finger states.
 
-    confidenceText.innerText =
-        "Confidence: " + confidence + "%";
+        Large distance from wrist
+        = extended finger.
+
+        Small distance
+        = curled finger.
+    */
 
 
-    statusText.innerText =
-        "🤖 I predicted your move!";
+    const indexOpen =
+        index > 1.35;
+
+    const middleOpen =
+        middle > 1.30;
+
+    const ringOpen =
+        ring > 1.25;
+
+    const pinkyOpen =
+        pinky > 1.20;
 
 
-    // Robot chooses counter
+    const openCount =
 
-    const robotMove =
-        getCounter(predicted);
+        (indexOpen ? 1 : 0) +
+        (middleOpen ? 1 : 0) +
+        (ringOpen ? 1 : 0) +
+        (pinkyOpen ? 1 : 0);
+
+
+    /*
+        ROCK
+
+        Most fingers curled.
+    */
+
+    if (openCount <= 1) {
+
+        return {
+
+            move: "ROCK",
+
+            confidence: 82
+
+        };
+
+    }
+
+
+    /*
+        PAPER
+
+        Almost all fingers open.
+    */
+
+    if (openCount >= 4) {
+
+        return {
+
+            move: "PAPER",
+
+            confidence: 86
+
+        };
+
+    }
+
+
+    /*
+        SCISSORS
+
+        Index + middle open,
+        ring + pinky curled.
+    */
+
+    if (
+        indexOpen &&
+        middleOpen &&
+        !ringOpen &&
+        !pinkyOpen
+    ) {
+
+        return {
+
+            move: "SCISSORS",
+
+            confidence: 90
+
+        };
+
+    }
+
+
+    /*
+        If the pose is incomplete,
+        look at the direction it is moving.
+
+        This is what makes this different
+        from simply recognizing the final pose.
+    */
+
+
+    const recent =
+        movementHistory.slice(-5);
+
+
+    let indexTrend = 0;
+    let middleTrend = 0;
+    let ringTrend = 0;
+    let pinkyTrend = 0;
+
+
+    if (recent.length >= 2) {
+
+        const first =
+            recent[0].features;
+
+        const last =
+            recent[recent.length - 1].features;
+
+
+        indexTrend =
+            last[1] - first[1];
+
+        middleTrend =
+            last[2] - first[2];
+
+        ringTrend =
+            last[3] - first[3];
+
+        pinkyTrend =
+            last[4] - first[4];
+
+    }
+
+
+    /*
+        Fingers closing together
+        suggests ROCK.
+    */
+
+    if (
+        indexTrend < -0.08 &&
+        middleTrend < -0.08 &&
+        ringTrend < -0.05
+    ) {
+
+        return {
+
+            move: "ROCK",
+
+            confidence: 73
+
+        };
+
+    }
+
+
+    /*
+        Index + middle extending while
+        ring + pinky stay relatively closed
+        suggests SCISSORS.
+    */
+
+    if (
+        indexTrend > 0.05 &&
+        middleTrend > 0.05 &&
+        ringTrend < 0.04
+    ) {
+
+        return {
+
+            move: "SCISSORS",
+
+            confidence: 75
+
+        };
+
+    }
+
+
+    /*
+        Several fingers extending
+        suggests PAPER.
+    */
+
+    if (
+        indexTrend > 0.04 &&
+        middleTrend > 0.04 &&
+        ringTrend > 0.04 &&
+        pinkyTrend > 0.04
+    ) {
+
+        return {
+
+            move: "PAPER",
+
+            confidence: 76
+
+        };
+
+    }
+
+
+    return {
+
+        move: "ANALYZING",
+
+        confidence: 0
+
+    };
+
+}
+
+
+/* ---------------------------------------
+   LOCK PREDICTION
+--------------------------------------- */
+
+function lockPrediction(
+    move,
+    confidence
+) {
+
+    predictionLocked = true;
+
+
+    document.getElementById(
+        "prediction"
+    ).innerText = move;
+
+
+    document.getElementById(
+        "confidence"
+    ).innerText =
+        "AI confidence: " +
+        confidence +
+        "%";
+
+
+    document.getElementById(
+        "status"
+    ).innerText =
+        "I KNOW YOUR MOVE 😈";
+
+
+    /*
+        Choose the counter.
+    */
+
+    const counter =
+        getCounter(move);
 
 
     setTimeout(() => {
 
-        showResult(predicted, robotMove);
+        showResult(move, counter);
 
-    }, 1200);
+    }, 800);
+
 }
 
 
-// -------------------------------
-// COUNTER LOGIC
-// -------------------------------
+/* ---------------------------------------
+   COUNTER
+--------------------------------------- */
 
-function getCounter(playerMove) {
+function getCounter(move) {
 
-    if (playerMove === "ROCK")
+    if (move === "ROCK")
         return "PAPER";
 
-    if (playerMove === "PAPER")
+
+    if (move === "PAPER")
         return "SCISSORS";
 
-    if (playerMove === "SCISSORS")
+
+    if (move === "SCISSORS")
         return "ROCK";
+
 }
 
 
-// -------------------------------
-// SHOW RESULT
-// -------------------------------
+/* ---------------------------------------
+   RESULT
+--------------------------------------- */
 
-function showResult(playerMove, robotMove) {
+function showResult(
+    playerMove,
+    robotMove
+) {
 
-    resultText.innerText =
-        "You: " + playerMove +
-        "  |  Robot: " + robotMove;
+    document.getElementById(
+        "robotMove"
+    ).innerText =
+        "🤖 ROBOT: " + robotMove;
+
+
+    document.getElementById(
+        "result"
+    ).innerText =
+        "Predicted " +
+        playerMove +
+        " → Countered with " +
+        robotMove;
 
 
     robotScore++;
 
-    document.getElementById("robotScore")
-        .innerText = robotScore;
+
+    document.getElementById(
+        "robotScore"
+    ).innerText =
+        robotScore;
 
 
-    statusText.innerText =
-        "😈 I countered you!";
+    document.getElementById(
+        "status"
+    ).innerText =
+        "ROUND COMPLETE";
 
 
-    gameRunning = false;
+    setTimeout(() => {
+
+        resetRound();
+
+    }, 2500);
+
 }
 
 
-// -------------------------------
-// INITIALIZE
-// -------------------------------
+/* ---------------------------------------
+   RESET
+--------------------------------------- */
 
-startCamera();
+function resetRound() {
+
+    movementHistory = [];
+
+    previousFeatures = null;
+
+    predictionLocked = false;
+
+
+    document.getElementById(
+        "prediction"
+    ).innerText =
+        "🔮";
+
+
+    document.getElementById(
+        "confidence"
+    ).innerText =
+        "Confidence: --";
+
+
+    document.getElementById(
+        "robotMove"
+    ).innerText =
+        "🤖";
+
+
+    document.getElementById(
+        "result"
+    ).innerText =
+        "";
+
+
+    document.getElementById(
+        "status"
+    ).innerText =
+        "SHOW ME YOUR MOVE ✋";
+
+}
+
+
+/* ---------------------------------------
+   BUTTON
+--------------------------------------- */
+
+window.startGame = function() {
+
+    resetRound();
+
+    document.getElementById(
+        "status"
+    ).innerText =
+        "WATCHING YOUR HAND... 👀";
+
+};
+
+
+/* ---------------------------------------
+   START
+--------------------------------------- */
+
+window.addEventListener(
+    "load",
+    async () => {
+
+        await initializeAI();
+
+        await startCamera();
+
+    }
+);
 
 </script>
 
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+
+    margin: 0;
+
+    min-height: 100vh;
+
+    font-family:
+        Arial,
+        sans-serif;
+
+    background:
+        radial-gradient(
+            circle at top,
+            #252545,
+            #08080d
+        );
+
+    color: white;
+
+    display: flex;
+
+    justify-content: center;
+
+    align-items: center;
+
+}
+
+
+.container {
+
+    width: 94%;
+
+    max-width: 650px;
+
+    text-align: center;
+
+}
+
+
+h1 {
+
+    font-size: 32px;
+
+    margin-bottom: 5px;
+
+}
+
+
+.subtitle {
+
+    color: #aaa;
+
+    margin-bottom: 20px;
+
+}
+
+
+.camera-box {
+
+    position: relative;
+
+    width: 100%;
+
+    aspect-ratio: 4 / 3;
+
+    overflow: hidden;
+
+    border-radius: 22px;
+
+    background: #15151c;
+
+}
+
+
+video {
+
+    width: 100%;
+
+    height: 100%;
+
+    object-fit: cover;
+
+    transform:
+        scaleX(-1);
+
+}
+
+
+.status {
+
+    margin-top: 15px;
+
+    padding: 15px;
+
+    border-radius: 15px;
+
+    background: #1c1c27;
+
+    font-size: 19px;
+
+}
+
+
+.prediction {
+
+    font-size: 38px;
+
+    font-weight: bold;
+
+    margin-top: 15px;
+
+}
+
+
+.confidence {
+
+    color: #aaa;
+
+}
+
+
+.robotMove {
+
+    font-size: 25px;
+
+    margin-top: 15px;
+
+}
+
+
+.result {
+
+    margin-top: 12px;
+
+    font-size: 18px;
+
+    color: #ddd;
+
+}
+
+
+button {
+
+    margin-top: 20px;
+
+    padding: 15px 35px;
+
+    border: none;
+
+    border-radius: 14px;
+
+    font-size: 18px;
+
+    font-weight: bold;
+
+    cursor: pointer;
+
+}
+
+
+.score {
+
+    margin-top: 20px;
+
+    font-size: 18px;
+
+}
+
+</style>
+
+
+<body>
+
+<div class="container">
+
+    <h1>
+        🤖 Predictive RPS AI
+    </h1>
+
+    <div class="subtitle">
+        AI tries to predict your move before you finish it
+    </div>
+
+
+    <div class="camera-box">
+
+        <video
+            id="camera"
+            autoplay
+            playsinline>
+        </video>
+
+    </div>
+
+
+    <div
+        class="status"
+        id="status">
+
+        Loading AI...
+
+    </div>
+
+
+    <div
+        class="prediction"
+        id="prediction">
+
+        🔮
+
+    </div>
+
+
+    <div
+        class="confidence"
+        id="confidence">
+
+        Confidence: --
+
+    </div>
+
+
+    <div
+        class="robotMove"
+        id="robotMove">
+
+        🤖
+
+    </div>
+
+
+    <div
+        class="result"
+        id="result">
+
+    </div>
+
+
+    <button
+        onclick="startGame()">
+
+        START ROUND
+
+    </button>
+
+
+    <div class="score">
+
+        You:
+        <span id="playerScore">0</span>
+
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+
+        Robot:
+        <span id="robotScore">0</span>
+
+    </div>
+
+</div>
+
 </body>
+
 </html>
