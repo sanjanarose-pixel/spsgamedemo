@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Predictive RPS AI</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+
+        .camera-box {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #222;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 15px;
+            background: #222;
+            border-radius: 15px;
+            font-size: 20px;
+        }
+
+        .prediction {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px;
+        }
+
+        .confidence {
+            color: #aaa;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 12px;
+            background: white;
+            color: black;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        .score {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+
+        .robot {
+            font-size: 60px;
+            margin: 10px;
+        }
+
+        .result {
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>🤖 Predictive RPS AI</h1>
+
+    <div class="subtitle">
+        Can AI predict your move?
+    </div>
+
+    <div class="camera-box">
+        <video id="camera" autoplay playsinline></video>
+    </div>
+
+    <div class="status" id="status">
+        Press START
+    </div>
+
+    <div class="prediction" id="prediction">
+        ❓
+    </div>
+
+    <div class="confidence" id="confidence">
+        Confidence: 0%
+    </div>
+
+    <button onclick="startGame()">
+        START GAME
+    </button>
+
+    <div class="robot">
+        🤖
+    </div>
+
+    <div class="result" id="result">
+        
+    </div>
+
+    <div class="score">
+        You: <span id="playerScore">0</span>
+        &nbsp;&nbsp; Robot:
+        <span id="robotScore">0</span>
+    </div>
+
+</div>
+
+<script>
+
+const video = document.getElementById("camera");
+
+const statusText = document.getElementById("status");
+const predictionText = document.getElementById("prediction");
+const confidenceText = document.getElementById("confidence");
+const resultText = document.getElementById("result");
+
+let playerScore = 0;
+let robotScore = 0;
+
+let gameRunning = false;
+
+
+// -------------------------------
+// START CAMERA
+// -------------------------------
+
+async function startCamera() {
+
+    try {
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: "user"
+            },
+            audio: false
+        });
+
+        video.srcObject = stream;
+
+    } catch (error) {
+
+        statusText.innerText =
+            "❌ Camera permission denied";
+
+        console.error(error);
+    }
+}
+
+
+// -------------------------------
+// START GAME
+// -------------------------------
+
+function startGame() {
+
+    if (gameRunning)
+        return;
+
+    gameRunning = true;
+
+    resultText.innerText = "";
+
+    statusText.innerText =
+        "👋 Show me your move...";
+
+    predictionText.innerText =
+        "🔮 Thinking...";
+
+    confidenceText.innerText =
+        "Confidence: calculating...";
+
+
+    // Simulate the AI observing your movement
+
+    setTimeout(() => {
+
+        predictMove();
+
+    }, 2500);
+}
+
+
+// -------------------------------
+// PREDICT MOVE
+// -------------------------------
+
+function predictMove() {
+
+    /*
+        TEMPORARY PREDICTION ENGINE
+
+        Later we will replace this with
+        actual MediaPipe hand landmarks.
+
+        For now it randomly predicts a move
+        so that the complete game works.
+    */
+
+    const moves = [
+        "ROCK",
+        "PAPER",
+        "SCISSORS"
+    ];
+
+    const predicted =
+        moves[Math.floor(Math.random() * moves.length)];
+
+
+    const confidence =
+        Math.floor(Math.random() * 20) + 80;
+
+
+    predictionText.innerText =
+        predicted;
+
+    confidenceText.innerText =
+        "Confidence: " + confidence + "%";
+
+
+    statusText.innerText =
+        "🤖 I predicted your move!";
+
+
+    // Robot chooses counter
+
+    const robotMove =
+        getCounter(predicted);
+
+
+    setTimeout(() => {
+
+        showResult(predicted, robotMove);
+
+    }, 1200);
+}
+
+
+// -------------------------------
+// COUNTER LOGIC
+// -------------------------------
+
+function getCounter(playerMove) {
+
+    if (playerMove === "ROCK")
+        return "PAPER";
+
+    if (playerMove === "PAPER")
+        return "SCISSORS";
+
+    if (playerMove === "SCISSORS")
+        return "ROCK";
+}
+
+
+// -------------------------------
+// SHOW RESULT
+// -------------------------------
+
+function showResult(playerMove, robotMove) {
+
+    resultText.innerText =
+        "You: " + playerMove +
+        "  |  Robot: " + robotMove;
+
+
+    robotScore++;
+
+    document.getElementById("robotScore")
+        .innerText = robotScore;
+
+
+    statusText.innerText =
+        "😈 I countered you!";
+
+
+    gameRunning = false;
+}
+
+
+// -------------------------------
+// INITIALIZE
+// -------------------------------
+
+startCamera();
+
+</script>
+
+</body>
+</html>
